@@ -299,3 +299,7 @@ struct test_softfloat {
    static void test_f32_min();
 };
 */
+
+struct test_permission {
+  static void check_authorization();
+};
