@@ -21,7 +21,8 @@ namespace eosio { namespace chain {
 
    block_id_type signed_block_header::id()const
    {
-      block_id_type result = fc::sha256::hash(*this);
+      // Do not include signed_block_header attributes in id, specifically exclude producer_signature.
+      block_id_type result = fc::sha256::hash(*static_cast<const block_header*>(this));
       result._hash[0] &= 0xffffffff00000000;
       result._hash[0] += fc::endian_reverse_u32(block_num()); // store the block num in the ID, 160 bits is plenty for the hash
       return result;
@@ -41,21 +42,5 @@ namespace eosio { namespace chain {
    {
       return signee() == expected_signee;
    }
-
-   checksum256_type signed_block_summary::calculate_transaction_mroot()const {
-      vector<digest_type> merkle_of_each_shard;
-      for(const region_summary& rs : regions) {
-         for(const cycle& cs : rs.cycles_summary) {
-            for(const shard_summary& ss: cs) {
-               vector<digest_type> merkle_list_for_txns_in_shard;
-               for(const transaction_receipt& tr : ss.transactions) {
-                  merkle_list_for_txns_in_shard.emplace_back(tr.id);
-               }
-               merkle_of_each_shard.emplace_back( merkle(std::move(merkle_list_for_txns_in_shard)) );
-            }
-         }
-      }
-      return merkle( std::move(merkle_of_each_shard) );
-    }
 
 } }

@@ -36,18 +36,27 @@
 	BUILD_DIR=${WORK_DIR}/build
 	TEMP_DIR=/tmp
 	ARCH=$( uname )
+	DISK_MIN=20
 	TIME_BEGIN=$( date -u +%s )
+	DOXYGEN=false #set to true to build docs
+
 	txtbld=$(tput bold)
 	bldred=${txtbld}$(tput setaf 1)
 	txtrst=$(tput sgr0)
 
-	DISK_MIN=20
 
 	printf "\n\tBeginning build version: ${VERSION}\n"
 	printf "\t$( date -u )\n"
 	printf "\tgit head id: $( cat .git/refs/heads/master )\n"
 	printf "\tCurrent branch: $( git branch | grep \* )\n"
 	printf "\n\tARCHITECTURE: ${ARCH}\n"
+
+	STALE_SUBMODS=$(( `git submodule status | grep -c "^[+\-]"` ))
+	if [ $STALE_SUBMODS -gt 0 ]; then
+		printf "\ngit submodules are not up to date\n"
+		printf "\tPlease run the command 'git submodule update --init --recursive'\n"
+		exit 1
+	fi
 
 	if [ $ARCH == "Linux" ]; then
 		
@@ -148,6 +157,7 @@
 	$CMAKE -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_CXX_COMPILER=${CXX_COMPILER} \
 	-DCMAKE_C_COMPILER=${C_COMPILER} -DWASM_ROOT=${WASM_ROOT} \
 	-DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR} -DBUILD_MONGO_DB_PLUGIN=true \
+	-DBUILD_DOXYGEN=${DOXYGEN} \
 	..
 	
 	if [ $? -ne 0 ]; then
@@ -181,7 +191,7 @@
 	TIME_END=$(( `date -u +%s` - $TIME_BEGIN ))
 
 
-	printf "${bldred}\t _______  _______  _______ _________ _______\n"
+	printf "\n\n${bldred}\t _______  _______  _______ _________ _______\n"
 	printf '\t(  ____ \(  ___  )(  ____ \\\\__   __/(  ___  )\n'
 	printf "\t| (    \/| (   ) || (    \/   ) (   | (   ) |\n"
 	printf "\t| (__    | |   | || (_____    | |   | |   | |\n"
@@ -193,6 +203,9 @@
 	printf "\n\tEOS.IO has been successfully built. %d:%d:%d\n\n" $(($TIME_END/3600)) $(($TIME_END%3600/60)) $(($TIME_END%60))
 	printf "\tTo verify your installation run the following commands:\n"
 	printf "\n\t$( which mongod ) -f ${MONGOD_CONF} &\n"
+	if [ "$OS_NAME" == "CentOS Linux" ]; then
+		printf "\tsource /opt/rh/python33/enable\n"
+	fi
 	printf "\tcd ${HOME}/eos/build; make test\n\n"
 	printf "\tFor more information:\n"
 	printf "\tEOS.IO website: https://eos.io\n"

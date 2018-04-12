@@ -4,7 +4,6 @@
  */
 #pragma once
 #include <eosio/chain/types.hpp>
-
 #include <numeric>
 
 namespace eosio { namespace chain {
@@ -14,10 +13,15 @@ namespace eosio { namespace chain {
       permission_name permission;
    };
 
+   inline bool operator== (const permission_level& lhs, const permission_level& rhs)
+   {
+      return (lhs.actor == rhs.actor) && (lhs.permission == rhs.permission);
+   }
+
    /**
     *  An action is performed by an actor, aka an account. It may
     *  be created explicitly and authorized by signatures or might be
-    *  generated implicitly by executing application code. 
+    *  generated implicitly by executing application code.
     *
     *  This follows the design pattern of React Flux where actions are
     *  named and then dispatched to one or more action handlers (aka stores).
@@ -75,8 +79,8 @@ namespace eosio { namespace chain {
 
 
    /**
-    * When a transaction is referenced by a block it could imply one of several outcomes which 
-    * describe the state-transition undertaken by the block producer. 
+    * When a transaction is referenced by a block it could imply one of several outcomes which
+    * describe the state-transition undertaken by the block producer.
     */
    struct transaction_receipt {
       enum status_enum {
@@ -90,6 +94,8 @@ namespace eosio { namespace chain {
       transaction_receipt( transaction_id_type tid ):status(executed),id(tid){}
 
       fc::enum_type<uint8_t,status_enum>  status;
+      fc::unsigned_int                    kcpu_usage;
+      fc::unsigned_int                    net_usage_words;
       transaction_id_type                 id;
    };
 
@@ -101,11 +107,11 @@ namespace eosio { namespace chain {
     *
     *  All transactions have an expiration time after which they
     *  may no longer be included in the blockchain. Once a block
-    *  with a block_header::timestamp greater than expiration is 
+    *  with a block_header::timestamp greater than expiration is
     *  deemed irreversible, then a user can safely trust the transaction
-    *  will never be included. 
+    *  will never be included.
     *
-    
+
     *  Each region is an independent blockchain, it is included as routing
     *  information for inter-blockchain communication. A contract in this
     *  region might generate or authorize a transaction intended for a foreign
@@ -113,12 +119,12 @@ namespace eosio { namespace chain {
     */
    struct transaction_header {
       time_point_sec         expiration;   ///< the time at which a transaction expires
-      uint16_t               region           = 0U; ///< the computational memory region this transaction applies to.
-      uint16_t               ref_block_num    = 0U; ///< specifies a block num in the last 2^16 blocks.
-      uint32_t               ref_block_prefix = 0UL; ///< specifies the lower 32 bits of the blockid at get_ref_blocknum
-      fc::unsigned_int       net_usage_words  = 0UL; /// number of 8 byte words this transaction serialize too taking any compression into account
-      fc::unsigned_int       kcpu_usage       = 0UL; /// number of kilo CPU usage units to bill transaction for to process all free actions
-      fc::unsigned_int       delay_sec        = 0UL; /// number of seconds to delay this transaction for during which it may be canceled.
+      uint16_t               region              = 0U; ///< the computational memory region this transaction applies to.
+      uint16_t               ref_block_num       = 0U; ///< specifies a block num in the last 2^16 blocks.
+      uint32_t               ref_block_prefix    = 0UL; ///< specifies the lower 32 bits of the blockid at get_ref_blocknum
+      fc::unsigned_int       max_net_usage_words = 0UL; /// upper limit on total network bandwidth (in 8 byte words) billed for this transaction
+      fc::unsigned_int       max_kcpu_usage      = 0UL; /// upper limit on the total number of kilo CPU usage units billed for this transaction
+      fc::unsigned_int       delay_sec           = 0UL; /// number of seconds to delay this transaction for during which it may be canceled.
 
       /**
        * @return the absolute block number given the relative ref_block_num
@@ -141,7 +147,10 @@ namespace eosio { namespace chain {
 
       transaction_id_type        id()const;
       digest_type                sig_digest( const chain_id_type& chain_id, const vector<bytes>& cfd = vector<bytes>() )const;
-      flat_set<public_key_type>  get_signature_keys( const vector<signature_type>& signatures, const chain_id_type& chain_id, const vector<bytes>& cfd = vector<bytes>() )const;
+      flat_set<public_key_type>  get_signature_keys( const vector<signature_type>& signatures,
+                                                     const chain_id_type& chain_id,
+                                                     const vector<bytes>& cfd = vector<bytes>(),
+                                                     bool allow_duplicate_keys = false )const;
 
    };
 
@@ -162,13 +171,13 @@ namespace eosio { namespace chain {
 
       const signature_type&     sign(const private_key_type& key, const chain_id_type& chain_id);
       signature_type            sign(const private_key_type& key, const chain_id_type& chain_id)const;
-      flat_set<public_key_type> get_signature_keys( const chain_id_type& chain_id )const;
+      flat_set<public_key_type> get_signature_keys( const chain_id_type& chain_id, bool allow_duplicate_keys = false )const;
    };
 
    struct packed_transaction {
       enum compression_type {
-         none,
-         zlib,
+         none = 0,
+         zlib = 1,
       };
 
       packed_transaction() = default;
@@ -180,28 +189,31 @@ namespace eosio { namespace chain {
 
       explicit packed_transaction(const signed_transaction& t, compression_type _compression = none)
       :signatures(t.signatures)
-      ,context_free_data(t.context_free_data)
       {
-         set_transaction(t, _compression);
+         set_transaction(t, t.context_free_data, _compression);
       }
 
       explicit packed_transaction(signed_transaction&& t, compression_type _compression = none)
       :signatures(std::move(t.signatures))
-      ,context_free_data(std::move(t.context_free_data))
       {
-         set_transaction(t, _compression);
+         set_transaction(t, std::move(t.context_free_data), _compression);
       }
 
-      vector<signature_type>    signatures;
-      vector<bytes>             context_free_data;
-      compression_type          compression;
-      bytes                     data;
+      uint32_t get_billable_size()const;
 
-      bytes                     get_raw_transaction()const;
-      transaction               get_transaction()const;
-      signed_transaction        get_signed_transaction()const;
-      void                      set_transaction(const transaction& t, compression_type _compression = none);
+      digest_type packed_digest()const;
 
+      vector<signature_type>                  signatures;
+      fc::enum_type<uint8_t,compression_type> compression;
+      bytes                                   packed_context_free_data;
+      bytes                                   packed_trx;
+
+      bytes              get_raw_transaction()const;
+      vector<bytes>      get_context_free_data()const;
+      transaction        get_transaction()const;
+      signed_transaction get_signed_transaction()const;
+      void               set_transaction(const transaction& t, compression_type _compression = none);
+      void               set_transaction(const transaction& t, const vector<bytes>& cfd, compression_type _compression = none);
    };
 
 
@@ -218,7 +230,7 @@ namespace eosio { namespace chain {
       uint128_t      sender_id; /// ID assigned by sender of generated, accessible via WASM api when executing normal or error
       account_name   sender; /// receives error handler callback
       account_name   payer;
-      time_point_sec execute_after; /// delayed exeuction
+      time_point_sec execute_after; /// delayed execution
 
       deferred_transaction() = default;
 
@@ -233,26 +245,23 @@ namespace eosio { namespace chain {
 
    struct deferred_reference {
       deferred_reference(){}
-      deferred_reference( const account_name& sender, uint128_t sender_id)
+      deferred_reference( const account_name& sender, const uint128_t& sender_id)
       :sender(sender),sender_id(sender_id)
       {}
 
       account_name   sender;
-      uint128_t       sender_id;
+      uint128_t      sender_id;
    };
 } } // eosio::chain
 
 FC_REFLECT( eosio::chain::permission_level, (actor)(permission) )
 FC_REFLECT( eosio::chain::action, (account)(name)(authorization)(data) )
-FC_REFLECT( eosio::chain::transaction_receipt, (status)(id))
+FC_REFLECT( eosio::chain::transaction_receipt, (status)(kcpu_usage)(net_usage_words)(id))
 FC_REFLECT( eosio::chain::transaction_header, (expiration)(region)(ref_block_num)(ref_block_prefix)
-                                              (net_usage_words)(kcpu_usage)(delay_sec) )
+                                              (max_net_usage_words)(max_kcpu_usage)(delay_sec) )
 FC_REFLECT_DERIVED( eosio::chain::transaction, (eosio::chain::transaction_header), (context_free_actions)(actions) )
 FC_REFLECT_DERIVED( eosio::chain::signed_transaction, (eosio::chain::transaction), (signatures)(context_free_data) )
 FC_REFLECT_ENUM( eosio::chain::packed_transaction::compression_type, (none)(zlib))
-FC_REFLECT( eosio::chain::packed_transaction, (signatures)(context_free_data)(compression)(data) )
+FC_REFLECT( eosio::chain::packed_transaction, (signatures)(compression)(packed_context_free_data)(packed_trx) )
 FC_REFLECT_DERIVED( eosio::chain::deferred_transaction, (eosio::chain::transaction), (sender_id)(sender)(payer)(execute_after) )
-FC_REFLECT( eosio::chain::deferred_reference, (sender_id)(sender) )
-
-
-
+FC_REFLECT( eosio::chain::deferred_reference, (sender)(sender_id) )
